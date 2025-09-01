@@ -33,13 +33,12 @@ st.set_page_config(
 st.markdown("""
 <style>
 .main-title {
-    font-size: 28px !important;
-    font-weight: bold !important;
-    color: #1E88E5 !important;
-    text-align: center !important;
-    margin-bottom: 20px !important;
-    font-family: 'Times New Roman', serif !important;
-}
+        font-size: 1.8rem;
+        color: #1f77b4;
+        text-align: center;
+        margin-bottom: 1rem;
+        font-weight: bold;
+    }
 .info-box {
     background-color: #E3F2FD;
     padding: 20px;
@@ -873,6 +872,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
