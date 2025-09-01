@@ -53,15 +53,24 @@ def load_models_from_zip(zip_file):
                 if os.path.exists(scaler_path):
                     models['param_scalers'][param] = joblib.load(scaler_path)
             
-            # Load trained models
+            # Load trained models with error handling
             models['all_models'] = {}
+            model_types = ['randomforest', 'gradientboosting', 'svr', 'gaussianprocess']
+            
             for param in param_names:
                 param_models = {}
-                for model_type in ['randomforest', 'gradientboosting', 'svr', 'gaussianprocess']:
+                for model_type in model_types:
                     model_path = os.path.join(temp_dir, f"{param}_{model_type}.save")
                     if os.path.exists(model_path):
-                        model = joblib.load(model_path)
-                        param_models[model_type.capitalize()] = model
+                        try:
+                            model = joblib.load(model_path)
+                            # Check if the loaded object is actually a model and not a numpy array
+                            if hasattr(model, 'predict') or (hasattr(model, '__class__') and 'gaussian_process' in str(model.__class__)):
+                                param_models[model_type.capitalize()] = model
+                            else:
+                                st.warning(f"File {param}_{model_type}.save exists but doesn't contain a valid model")
+                        except Exception as e:
+                            st.warning(f"Error loading {param}_{model_type}.save: {str(e)}")
                 models['all_models'][param] = param_models
                 
             # Load training statistics
@@ -156,6 +165,11 @@ def process_spectrum(spectrum_file, models, target_length=64607):
             
             for model_name, model in models['all_models'][param].items():
                 try:
+                    # Skip models that don't have predict method
+                    if not hasattr(model, 'predict'):
+                        st.warning(f"Skipping {model_name} for {param}: no predict method")
+                        continue
+                        
                     if model_name.lower() == 'gaussianprocess':
                         # Gaussian Process provides native uncertainty
                         y_pred, y_std = model.predict(X_pca, return_std=True)
@@ -166,22 +180,37 @@ def process_spectrum(spectrum_file, models, target_length=64607):
                         param_uncertainties[model_name] = y_std_orig[0]
                         
                     else:
-                        # For other models, use various uncertainty estimation methods
+                        # For other models
                         y_pred = model.predict(X_pca)
                         y_pred_orig = models['param_scalers'][param].inverse_transform(y_pred.reshape(-1, 1)).flatten()
                         
                         # Estimate uncertainty based on model type
                         if hasattr(model, 'estimators_'):
-                            # Use standard deviation of tree predictions
+                            # Use standard deviation of tree predictions (for Random Forest)
                             tree_preds = [tree.predict(X_pca) for tree in model.estimators_]
                             tree_preds_orig = [models['param_scalers'][param].inverse_transform(pred.reshape(-1, 1)).flatten()[0] 
                                              for pred in tree_preds]
                             uncertainty = np.std(tree_preds_orig)
+                        elif hasattr(model, 'staged_predict'):
+                            # For Gradient Boosting, use staged predictions for uncertainty
+                            try:
+                                staged_preds = list(model.staged_predict(X_pca))
+                                staged_preds_orig = [models['param_scalers'][param].inverse_transform(pred.reshape(-1, 1)).flatten()[0] 
+                                                   for pred in staged_preds]
+                                # Use std of later stage predictions (after convergence)
+                                n_stages = len(staged_preds_orig)
+                                if n_stages > 10:
+                                    uncertainty = np.std(staged_preds_orig[-10:])
+                                else:
+                                    uncertainty = np.std(staged_preds_orig)
+                            except:
+                                uncertainty = abs(y_pred_orig[0]) * 0.1
                         else:
-                            # Default uncertainty
-                            if param in models['training_errors'] and model_name in models['training_errors'][param]:
+                            # For SVR and other models, use training error as proxy
+                            if param in models.get('training_errors', {}) and model_name in models['training_errors'][param]:
                                 uncertainty = models['training_errors'][param][model_name]
                             else:
+                                # Fallback: use a percentage of prediction
                                 uncertainty = abs(y_pred_orig[0]) * 0.1  # 10% of prediction
                         
                         param_predictions[model_name] = y_pred_orig[0]
@@ -386,6 +415,14 @@ def main():
                     return
                 
                 st.success(message)
+                
+                # Show which models were loaded successfully
+                st.subheader("Loaded Models")
+                param_names = ['logn', 'tex', 'velo', 'fwhm']
+                for param in param_names:
+                    if param in models['all_models']:
+                        model_count = len(models['all_models'][param])
+                        st.write(f"{param}: {model_count} model(s) loaded")
             
             # Process spectrum
             with st.spinner("Processing spectrum and making predictions..."):
@@ -438,28 +475,31 @@ def main():
                     
                     # Create individual plots for each parameter
                     for param, label in zip(results['param_names'], results['param_labels']):
-                        fig = create_comparison_plot(
-                            results['predictions'], 
-                            results['uncertainties'], 
-                            param, 
-                            label, 
-                            models['training_stats'],
-                            spectrum_file.name
-                        )
-                        st.pyplot(fig)
-                        
-                        # Option to download each plot
-                        buf = BytesIO()
-                        fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
-                        buf.seek(0)
-                        
-                        st.download_button(
-                            label=f"📥 Download {label} plot",
-                            data=buf,
-                            file_name=f"prediction_{param}.png",
-                            mime="image/png",
-                            key=f"download_{param}"
-                        )
+                        if param in results['predictions'] and results['predictions'][param]:
+                            fig = create_comparison_plot(
+                                results['predictions'], 
+                                results['uncertainties'], 
+                                param, 
+                                label, 
+                                models['training_stats'],
+                                spectrum_file.name
+                            )
+                            st.pyplot(fig)
+                            
+                            # Option to download each plot
+                            buf = BytesIO()
+                            fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
+                            buf.seek(0)
+                            
+                            st.download_button(
+                                label=f"📥 Download {label} plot",
+                                data=buf,
+                                file_name=f"prediction_{param}.png",
+                                mime="image/png",
+                                key=f"download_{param}"
+                            )
+                        else:
+                            st.warning(f"No predictions available for {label}")
                 
                 with tab3:
                     st.subheader("Combined Prediction Plot")
