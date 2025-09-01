@@ -29,6 +29,59 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Custom CSS
+st.markdown("""
+<style>
+.main-title {
+    font-size: 28px !important;
+    font-weight: bold !important;
+    color: #1E88E5 !important;
+    text-align: center !important;
+    margin-bottom: 20px !important;
+    font-family: 'Times New Roman', serif !important;
+}
+.info-box {
+    background-color: #E3F2FD;
+    padding: 20px;
+    border-radius: 10px;
+    border-left: 5px solid #1E88E5;
+    margin: 20px 0px;
+}
+.info-box h4 {
+    color: #1565C0;
+    margin-top: 0;
+}
+.metric-card {
+    background-color: #F5F5F5;
+    padding: 15px;
+    border-radius: 10px;
+    text-align: center;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Add the header image and title
+st.image("NGC6523_BVO_2.jpg", use_column_width=True)
+
+col1, col2 = st.columns([1, 3])
+with col1:
+    st.empty()
+    
+with col2:
+    st.markdown('<p class="main-title">AI-ITACA | Artificial Intelligence Integral Tool for AstroChemical Analysis</p>', unsafe_allow_html=True)
+
+st.markdown("""
+A remarkable upsurge in the complexity of molecules identified in the interstellar medium (ISM) is currently occurring, with over 80 new species discovered in the last three years. A number of them have been emphasized by prebiotic experiments as vital molecular building blocks of life. Since our Solar System was formed from a molecular cloud in the ISM, it prompts the query as to whether the rich interstellar chemical reservoir could have played a role in the emergence of life. The improved sensitivities of state-of-the-art astronomical facilities, such as the Atacama Large Millimeter/submillimeter Array (ALMA) and the James Webb Space Telescope (JWST), are revolutionizing the discovery of new molecules in space. However, we are still just scraping the tip of the iceberg. We are far from knowing the complete catalogue of molecules that astrochemistry can offer, as well as the complexity they can reach.<br><br>
+<strong>Artificial Intelligence Integral Tool for AstroChemical Analysis (AI-ITACA)</strong>, proposes to combine complementary machine learning (ML) techniques to address all the challenges that astrochemistry is currently facing. AI-ITACA will significantly contribute to the development of new AI-based cutting-edge analysis software that will allow us to make a crucial leap in the characterization of the level of chemical complexity in the ISM, and in our understanding of the contribution that interstellar chemistry might have in the origin of life.
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<div class="info-box">
+<h4>About GUAPOS</h4>
+<p>The G31.41+0.31 Unbiased ALMA sPectral Observational Survey (GUAPOS) project targets the hot molecular core (HMC) G31.41+0.31 (G31) to reveal the complex chemistry of one of the most chemically rich high-mass star-forming regions outside the Galactic center (GC).</p>
+</div>
+""", unsafe_allow_html=True)
+
 # Title of the application
 st.title("🔭 Spectral Parameters Predictor")
 st.markdown("""
@@ -622,6 +675,21 @@ def main():
                     return
                 
                 st.success(message)
+                
+                # Display model information
+                with st.expander("Model Information", expanded=True):
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("PCA Components", models['ipca'].n_components_)
+                    with col2:
+                        # Calculate total variance explained
+                        cumulative_variance = np.cumsum(models['ipca'].explained_variance_ratio_)
+                        total_variance = cumulative_variance[-1] if len(cumulative_variance) > 0 else 0
+                        st.metric("Variance Explained", f"{total_variance*100:.1f}%")
+                    with col3:
+                        # Count total models loaded
+                        total_models = sum(len(models['all_models'][param]) for param in models['all_models'])
+                        st.metric("Total Models", total_models)
                 
                 # Show which models were loaded successfully
                 st.subheader("Loaded Models")
