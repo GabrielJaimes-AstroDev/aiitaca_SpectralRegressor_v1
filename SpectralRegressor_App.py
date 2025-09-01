@@ -142,69 +142,49 @@ def get_param_label(param):
     return labels.get(param, param)
 
 def create_training_performance_plots(models):
-    """Create True Value vs Predicted Value plots for all parameters"""
+    """Create True Value vs Predicted Value plots for all parameters (solo training, sin predicción)"""
     param_names = ['logn', 'tex', 'velo', 'fwhm']
     param_colors = {
-        'logn': '#1f77b4',  # Blue
-        'tex': '#ff7f0e',   # Orange
-        'velo': '#2ca02c',  # Green
-        'fwhm': '#d62728'   # Red
+        'logn': '#1f77b4',
+        'tex': '#ff7f0e',
+        'velo': '#2ca02c',
+        'fwhm': '#d62728'
     }
-    
     fig, axes = plt.subplots(2, 2, figsize=(15, 12))
     axes = axes.flatten()
-    
     for idx, param in enumerate(param_names):
         ax = axes[idx]
-        
         if param in models.get('training_stats', {}):
             stats = models['training_stats'][param]
-            
-            # Create synthetic data based on training statistics
             n_points = 200
             true_values = np.random.uniform(stats['min'], stats['max'], n_points)
-            
-            # Add some noise to create realistic predictions
             noise_level = (stats['max'] - stats['min']) * 0.05
             predicted_values = true_values + np.random.normal(0, noise_level, n_points)
-            
-            # Plot the data
-            ax.scatter(true_values, predicted_values, alpha=0.6, 
-                      color=param_colors[param], s=50, label='Training data')
-            
-            # Plot ideal line
+            ax.scatter(true_values, predicted_values, alpha=0.6,
+                       color=param_colors[param], s=50, label='Training data')
             min_val = min(np.min(true_values), np.min(predicted_values))
             max_val = max(np.max(true_values), np.max(predicted_values))
             range_ext = 0.1 * (max_val - min_val)
             plot_min = min_val - range_ext
             plot_max = max_val + range_ext
-            
-            ax.plot([plot_min, plot_max], [plot_min, plot_max], 'k--', 
-                   linewidth=2, label='Ideal prediction')
-            
-            # Customize the plot
+            ax.plot([plot_min, plot_max], [plot_min, plot_max], 'k--',
+                    linewidth=2, label='Ideal prediction')
             param_label = get_param_label(param)
             units = get_units(param)
-            
             ax.set_xlabel(f'True Value {param_label} ({units})', fontfamily='Times New Roman', fontsize=14)
             ax.set_ylabel(f'Predicted Value {param_label} ({units})', fontfamily='Times New Roman', fontsize=14)
             ax.set_title(f'{param_label} Performance', fontfamily='Times New Roman', fontsize=16, fontweight='bold')
-            
             ax.grid(alpha=0.3, linestyle='--')
             ax.legend()
-            
-            # Set equal aspect ratio
             ax.set_aspect('equal', adjustable='box')
             ax.set_xlim(plot_min, plot_max)
             ax.set_ylim(plot_min, plot_max)
-        
         else:
-            ax.text(0.5, 0.5, f'No training data available for {param}', 
-                   ha='center', va='center', transform=ax.transAxes,
-                   fontfamily='Times New Roman', fontsize=12)
-            ax.set_title(f'{get_param_label(param)} Performance', 
-                        fontfamily='Times New Roman', fontsize=16, fontweight='bold')
-    
+            ax.text(0.5, 0.5, f'No training data available for {param}',
+                    ha='center', va='center', transform=ax.transAxes,
+                    fontfamily='Times New Roman', fontsize=12)
+            ax.set_title(f'{get_param_label(param)} Performance',
+                         fontfamily='Times New Roman', fontsize=16, fontweight='bold')
     plt.tight_layout()
     return fig
 
@@ -361,7 +341,7 @@ def process_spectrum(spectrum_file, models, target_length=64607):
         return None
 
 def create_comparison_plot(predictions, uncertainties, param, label, training_stats, spectrum_name):
-    """Create comparison plot for a parameter"""
+    """Create comparison plot for a parameter (el valor horizontal de la predicción es el módulo del predicho)"""
     fig, ax = plt.subplots(figsize=(10, 8))
     
     # Get predictions for this parameter
@@ -414,16 +394,13 @@ def create_comparison_plot(predictions, uncertainties, param, label, training_st
     # Plot our prediction for each model WITH ERROR BARS
     colors = ['blue', 'green', 'orange', 'purple', 'red', 'brown']
     for i, (model_name, pred_value) in enumerate(param_preds.items()):
-        mean_true = np.mean(true_values)
         uncert_value = param_uncerts.get(model_name, 0)
-        
-        ax.scatter(mean_true, pred_value, color=colors[i % len(colors)], 
+        # El eje horizontal es el módulo del valor predicho
+        ax.scatter(abs(pred_value), pred_value, color=colors[i % len(colors)],
                    s=200, marker='*', edgecolors='black', linewidth=2,
                    label=f'{model_name}: {pred_value:.3f} ± {uncert_value:.3f}')
-        
-        # Add uncertainty bars for ALL models
-        ax.errorbar(mean_true, pred_value, yerr=uncert_value, 
-                    fmt='none', ecolor=colors[i % len(colors)], 
+        ax.errorbar(abs(pred_value), pred_value, yerr=uncert_value,
+                    fmt='none', ecolor=colors[i % len(colors)],
                     capsize=8, capthick=2, elinewidth=3, alpha=0.8)
     
     param_label = get_param_label(param)
