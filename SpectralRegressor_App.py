@@ -23,7 +23,7 @@ plt.rcParams['mathtext.fontset'] = 'stix'  # For mathematical symbols
 
 # Page configuration
 st.set_page_config(
-    page_title="Spectral Parameters Predictor",
+    page_title="D.Spectral Parameters Predictor",
     page_icon="🔭",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -873,4 +873,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
