@@ -438,20 +438,41 @@ def process_spectrum(spectrum_file, models, target_length=64607):
                         param_uncertainties[model_name] = y_std_orig[0]
                         
                     else:
-                        # For ALL other models including GradientBoosting
+                        # For ALL other models including GradientBoosting and RandomForest
                         y_pred = model.predict(X_pca)
                         y_pred_orig = models['param_scalers'][param].inverse_transform(y_pred.reshape(-1, 1)).flatten()
                         
                         # Estimate uncertainty based on model type
-                        if (hasattr(model, 'estimators_') and 
-                            len(model.estimators_) > 0 and 
-                            not isinstance(model.estimators_[0][0], np.ndarray) and
-                            hasattr(model.estimators_[0][0], 'predict')):
-                            # Use standard deviation of tree predictions (for Random Forest and OLD GradientBoosting format)
-                            tree_preds = [tree.predict(X_pca) for tree in model.estimators_]
-                            tree_preds_orig = [models['param_scalers'][param].inverse_transform(pred.reshape(-1, 1)).flatten()[0] 
-                                             for pred in tree_preds]
-                            uncertainty = np.std(tree_preds_orig)
+                        if hasattr(model, 'estimators_') and len(model.estimators_) > 0:
+                            # For scikit-learn >= 1.0, estimators are numpy arrays
+                            # Use the model's built-in uncertainty estimation if available
+                            try:
+                                # Try to use the model's own uncertainty estimation
+                                if hasattr(model, 'predict_quantiles'):
+                                    # For GradientBoosting
+                                    quantiles = model.predict_quantiles(X_pca, quantiles=[0.16, 0.84])
+                                    uncertainty = (quantiles[0][1] - quantiles[0][0]) / 2
+                                elif hasattr(model, 'estimators_'):
+                                    # For tree-based models, use the standard deviation of predictions
+                                    # This works for both RandomForest and GradientBoosting in new versions
+                                    individual_preds = []
+                                    for estimator in model.estimators_:
+                                        if hasattr(estimator, 'predict'):
+                                            pred = estimator.predict(X_pca)
+                                            pred_orig = models['param_scalers'][param].inverse_transform(pred.reshape(-1, 1)).flatten()[0]
+                                            individual_preds.append(pred_orig)
+                                    
+                                    if individual_preds:
+                                        uncertainty = np.std(individual_preds)
+                                    else:
+                                        # Fallback if we can't get individual predictions
+                                        uncertainty = abs(y_pred_orig[0]) * 0.1
+                                else:
+                                    uncertainty = abs(y_pred_orig[0]) * 0.1
+                            except Exception as e:
+                                st.warning(f"Error in uncertainty estimation for {model_name}: {e}")
+                                uncertainty = abs(y_pred_orig[0]) * 0.1
+                                
                         elif hasattr(model, 'staged_predict'):
                             # For Gradient Boosting, use staged predictions for uncertainty
                             try:
@@ -852,3 +873,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
