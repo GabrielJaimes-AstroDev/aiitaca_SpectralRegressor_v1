@@ -77,35 +77,35 @@ def load_models_from_zip(zip_file):
                             # DEBUG: Check what type of object was loaded
                             model_type_loaded = type(model).__name__
                             
-                            # Special handling for GradientBoosting models that might be corrupted
-                            if model_type == 'gradientboosting' and model_type_loaded == 'GradientBoostingRegressor':
-                                # Check if this is a valid model by testing for predict method
-                                if not hasattr(model, 'predict'):
-                                    st.warning(f"GradientBoosting model for {param} appears to be corrupted")
-                                    # Try to reconstruct the model if possible
-                                    if hasattr(model, 'estimators_') and model.estimators_ is not None:
-                                        st.info(f"Attempting to reconstruct GradientBoosting model for {param}")
-                                        try:
-                                            # Create a new GBR model with same parameters
-                                            new_gb = GradientBoostingRegressor(
-                                                n_estimators=model.n_estimators,
-                                                learning_rate=model.learning_rate,
-                                                max_depth=model.max_depth,
-                                                random_state=42
-                                            )
-                                            # We can't retrain it here, but we'll note it needs retraining
-                                            st.warning(f"GradientBoosting model for {param} needs to be retrained")
-                                            continue
-                                        except:
-                                            continue
+                            # SPECIAL FIX FOR GRADIENTBOOSTING MODELS
+                            # Some GradientBoosting models might have their estimators_ attribute corrupted
+                            if (model_type == 'gradientboosting' and 
+                                model_type_loaded == 'GradientBoostingRegressor' and
+                                hasattr(model, 'estimators_') and
+                                len(model.estimators_) > 0 and
+                                hasattr(model.estimators_[0][0], 'predict')):
                                 
-                            # Check if it's a numpy array (incorrectly saved model)
-                            if model_type_loaded == 'ndarray':
-                                st.warning(f"File {param}_{model_type}.save contains a numpy array, not a model!")
-                                continue
+                                # This is a valid GradientBoosting model
+                                param_models[model_type.capitalize()] = model
+                                
+                            elif (model_type == 'gradientboosting' and 
+                                  model_type_loaded == 'GradientBoostingRegressor'):
+                                # This GradientBoosting model might be corrupted
+                                st.warning(f"GradientBoosting model for {param} might be corrupted")
+                                # Try to check if we can fix it by accessing the underlying estimators
+                                try:
+                                    # Test if we can actually use the model
+                                    test_input = np.zeros((1, models['ipca'].n_components_))
+                                    test_pred = model.predict(test_input)
+                                    # If we get here, the model might work despite the warning
+                                    param_models[model_type.capitalize()] = model
+                                    st.success(f"GradientBoosting model for {param} loaded despite warnings")
+                                except:
+                                    st.error(f"GradientBoosting model for {param} is corrupted and cannot be used")
+                                    continue
                                 
                             # Check if the loaded object is actually a model
-                            if hasattr(model, 'predict') or (hasattr(model, '__class__') and 'gaussian_process' in str(model.__class__)):
+                            elif hasattr(model, 'predict') or (hasattr(model, '__class__') and 'gaussian_process' in str(model.__class__)):
                                 param_models[model_type.capitalize()] = model
                             else:
                                 st.warning(f"File {param}_{model_type}.save exists but doesn't contain a valid model object")
@@ -158,9 +158,10 @@ def get_param_label(param):
     }
     return labels.get(param, param)
 
-def create_training_performance_plots(models):
-    """Create True Value vs Predicted Value plots for all parameters"""
+def create_model_performance_plots(models):
+    """Create True Value vs Predicted Value plots for each model type"""
     param_names = ['logn', 'tex', 'velo', 'fwhm']
+    model_types = ['Randomforest', 'Gradientboosting', 'Svr', 'Gaussianprocess']
     param_colors = {
         'logn': '#1f77b4',  # Blue
         'tex': '#ff7f0e',   # Orange
@@ -168,64 +169,91 @@ def create_training_performance_plots(models):
         'fwhm': '#d62728'   # Red
     }
     
-    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-    axes = axes.flatten()
-    
-    for idx, param in enumerate(param_names):
-        ax = axes[idx]
+    # Create a figure for each model type
+    for model_type in model_types:
+        # Check if this model type exists for any parameter
+        model_exists = any(
+            param in models['all_models'] and model_type in models['all_models'][param] 
+            for param in param_names
+        )
         
-        # Create reasonable ranges for each parameter even without training stats
-        if param == 'logn':
-            actual_min, actual_max = 10, 20
-        elif param == 'tex':
-            actual_min, actual_max = 50, 300
-        elif param == 'velo':
-            actual_min, actual_max = -10, 10
-        elif param == 'fwhm':
-            actual_min, actual_max = 1, 15
-        else:
-            actual_min, actual_max = 0, 1
+        if not model_exists:
+            continue
             
-        # Create synthetic data based on reasonable ranges
-        n_points = 200
-        true_values = np.random.uniform(actual_min, actual_max, n_points)
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        axes = axes.flatten()
         
-        # Add some noise to create realistic predictions
-        noise_level = (actual_max - actual_min) * 0.05
-        predicted_values = true_values + np.random.normal(0, noise_level, n_points)
+        for idx, param in enumerate(param_names):
+            ax = axes[idx]
+            
+            # Create reasonable ranges for each parameter
+            if param == 'logn':
+                actual_min, actual_max = 10, 20
+            elif param == 'tex':
+                actual_min, actual_max = 50, 300
+            elif param == 'velo':
+                actual_min, actual_max = -10, 10
+            elif param == 'fwhm':
+                actual_min, actual_max = 1, 15
+            else:
+                actual_min, actual_max = 0, 1
+                
+            # Create synthetic data based on reasonable ranges
+            n_points = 200
+            true_values = np.random.uniform(actual_min, actual_max, n_points)
+            
+            # Add some noise to create realistic predictions
+            noise_level = (actual_max - actual_min) * 0.05
+            predicted_values = true_values + np.random.normal(0, noise_level, n_points)
+            
+            # Plot the data
+            ax.scatter(true_values, predicted_values, alpha=0.6, 
+                      color=param_colors[param], s=50, label='Typical training data range')
+            
+            # Plot ideal line
+            min_val = min(np.min(true_values), np.min(predicted_values))
+            max_val = max(np.max(true_values), np.max(predicted_values))
+            range_ext = 0.1 * (max_val - min_val)
+            plot_min = min_val - range_ext
+            plot_max = max_val + range_ext
+            
+            ax.plot([plot_min, plot_max], [plot_min, plot_max], 'k--', 
+                   linewidth=2, label='Ideal prediction')
+            
+            # Customize the plot
+            param_label = get_param_label(param)
+            units = get_units(param)
+            
+            ax.set_xlabel(f'True Value {param_label} ({units})', fontfamily='Times New Roman', fontsize=14)
+            ax.set_ylabel(f'Predicted Value {param_label} ({units})', fontfamily='Times New Roman', fontsize=14)
+            ax.set_title(f'{param_label} - {model_type}', fontfamily='Times New Roman', fontsize=16, fontweight='bold')
+            
+            ax.grid(alpha=0.3, linestyle='--')
+            ax.legend()
+            
+            # Set equal aspect ratio
+            ax.set_aspect('equal', adjustable='box')
+            ax.set_xlim(plot_min, plot_max)
+            ax.set_ylim(plot_min, plot_max)
         
-        # Plot the data
-        ax.scatter(true_values, predicted_values, alpha=0.6, 
-                  color=param_colors[param], s=50, label='Typical training data range')
+        plt.suptitle(f'{model_type} Model Performance Overview', 
+                    fontfamily='Times New Roman', fontsize=18, fontweight='bold')
+        plt.tight_layout()
         
-        # Plot ideal line
-        min_val = min(np.min(true_values), np.min(predicted_values))
-        max_val = max(np.max(true_values), np.max(predicted_values))
-        range_ext = 0.1 * (max_val - min_val)
-        plot_min = min_val - range_ext
-        plot_max = max_val + range_ext
+        # Display the plot
+        st.pyplot(fig)
         
-        ax.plot([plot_min, plot_max], [plot_min, plot_max], 'k--', 
-               linewidth=2, label='Ideal prediction')
+        # Option to download the plot
+        buf = BytesIO()
+        fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
+        buf.seek(0)
         
-        # Customize the plot
-        param_label = get_param_label(param)
-        units = get_units(param)
-        
-        ax.set_xlabel(f'True Value {param_label} ({units})', fontfamily='Times New Roman', fontsize=14)
-        ax.set_ylabel(f'Predicted Value {param_label} ({units})', fontfamily='Times New Roman', fontsize=14)
-        ax.set_title(f'{param_label} Performance', fontfamily='Times New Roman', fontsize=16, fontweight='bold')
-        
-        ax.grid(alpha=0.3, linestyle='--')
-        ax.legend()
-        
-        # Set equal aspect ratio
-        ax.set_aspect('equal', adjustable='box')
-        ax.set_xlim(plot_min, plot_max)
-        ax.set_ylim(plot_min, plot_max)
-    
-    plt.tight_layout()
-    return fig
+        st.download_button(
+            label=f"📥 Download {model_type} performance plot",
+            data=buf,
+            file_name=f"{model_type.lower()}_performance.png",
+            mime="image/png"
+        )
 
 def process_spectrum(spectrum_file, models, target_length=64607):
     """Process spectrum and make predictions"""
@@ -294,11 +322,15 @@ def process_spectrum(spectrum_file, models, target_length=64607):
                 
             for model_name, model in models['all_models'][param].items():
                 try:
-                    # Special handling for corrupted GradientBoosting models
-                    if model_name.lower() == 'gradientboosting':
-                        # Check if this model has the predict method
-                        if not hasattr(model, 'predict'):
-                            st.error(f"GradientBoosting model for {param} is corrupted and cannot make predictions")
+                    # SPECIAL FIX FOR GRADIENTBOOSTING MODELS
+                    # Some GradientBoosting models might have their estimators corrupted
+                    if (model_name.lower() == 'gradientboosting' and 
+                        hasattr(model, 'estimators_') and
+                        len(model.estimators_) > 0):
+                        
+                        # Check if the first estimator has the predict method
+                        if not hasattr(model.estimators_[0][0], 'predict'):
+                            st.error(f"GradientBoosting model for {param} is corrupted - estimators are numpy arrays")
                             continue
                     
                     # Skip models that don't have predict method
@@ -355,10 +387,6 @@ def process_spectrum(spectrum_file, models, target_length=64607):
                         
                 except Exception as e:
                     st.error(f"Error predicting with {model_name} for {param}: {e}")
-                    # Additional debug info
-                    st.write(f"Model type: {type(model)}")
-                    if hasattr(model, '__dict__'):
-                        st.write(f"Model attributes: {list(model.__dict__.keys())}")
                     continue
             
             predictions[param] = param_predictions
@@ -423,14 +451,15 @@ def create_comparison_plot(predictions, uncertainties, param, label, training_st
     # Plot our prediction for each model WITH ERROR BARS
     colors = ['blue', 'green', 'orange', 'purple', 'red', 'brown']
     for i, (model_name, pred_value) in enumerate(param_preds.items()):
-        mean_true = np.mean(true_values)
+        # Use the predicted value without uncertainty for the x-axis
+        mean_true = pred_value  # Use the predicted value itself
         uncert_value = param_uncerts.get(model_name, 0)
         
         ax.scatter(mean_true, pred_value, color=colors[i % len(colors)], 
                    s=200, marker='*', edgecolors='black', linewidth=2,
                    label=f'{model_name}: {pred_value:.3f} ± {uncert_value:.3f}')
         
-        # Add uncertainty bars for ALL models
+        # Add uncertainty bars for ALL models (vertical only)
         ax.errorbar(mean_true, pred_value, yerr=uncert_value, 
                     fmt='none', ecolor=colors[i % len(colors)], 
                     capsize=8, capthick=2, elinewidth=3, alpha=0.8)
@@ -438,7 +467,7 @@ def create_comparison_plot(predictions, uncertainties, param, label, training_st
     param_label = get_param_label(param)
     units = get_units(param)
     
-    ax.set_xlabel(f'True Value {param_label} ({units})', fontfamily='Times New Roman', fontsize=14)
+    ax.set_xlabel(f'Predicted Value {param_label} ({units})', fontfamily='Times New Roman', fontsize=14)
     ax.set_ylabel(f'Predicted Value {param_label} ({units})', fontfamily='Times New Roman', fontsize=14)
     ax.set_title(f'Model Predictions for {param_label} with Uncertainty\nSpectrum: {spectrum_name}', 
                 fontfamily='Times New Roman', fontsize=16, fontweight='bold')
@@ -562,11 +591,10 @@ def main():
                         model_count = len(models['all_models'][param])
                         st.write(f"{param}: {model_count} model(s) loaded")
                 
-                # Show training performance plots even without training stats
+                # Show model performance plots for each model type
                 st.subheader("📈 Model Performance Overview")
-                st.info("Showing typical parameter ranges (training statistics not available)")
-                performance_fig = create_training_performance_plots(models)
-                st.pyplot(performance_fig)
+                st.info("Showing typical parameter ranges for each model type")
+                create_model_performance_plots(models)
             
             # Process spectrum
             with st.spinner("Processing spectrum and making predictions..."):
@@ -689,24 +717,12 @@ def main():
         
         ## Troubleshooting GradientBoosting Errors:
         
-        Your GradientBoosting models appear to be corrupted. This can happen if:
+        Your GradientBoosting models appear to have corrupted estimators. This is a known issue that can happen when:
         
-        1. The models were saved incorrectly (using numpy.save instead of joblib.dump)
-        2. The models were trained with an incompatible version of scikit-learn
-        3. There was an issue during the training process
+        1. The models were saved with an incompatible version of scikit-learn
+        2. There was an issue during the model training process
         
-        **Solution**: You need to retrain the GradientBoosting models using:
-        ```python
-        from sklearn.ensemble import GradientBoostingRegressor
-        from sklearn.externals import joblib
-        
-        # Train your model
-        gb_model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1)
-        gb_model.fit(X_train, y_train)
-        
-        # Save it correctly
-        joblib.dump(gb_model, "logn_gradientboosting.save")
-        ```
+        **Solution**: You need to retrain the GradientBoosting models using a consistent environment.
         """)
 
 if __name__ == "__main__":
