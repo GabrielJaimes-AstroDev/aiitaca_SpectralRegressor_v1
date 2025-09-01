@@ -82,11 +82,20 @@ def load_models_from_zip(zip_file):
                             if (model_type == 'gradientboosting' and 
                                 model_type_loaded == 'GradientBoostingRegressor' and
                                 hasattr(model, 'estimators_') and
-                                len(model.estimators_) > 0 and
-                                hasattr(model.estimators_[0][0], 'predict')):
+                                len(model.estimators_) > 0):
                                 
-                                # This is a valid GradientBoosting model
-                                param_models[model_type.capitalize()] = model
+                                # Check if estimators are numpy arrays (new scikit-learn version)
+                                if isinstance(model.estimators_[0][0], np.ndarray):
+                                    # This is the new format - we can use the model directly
+                                    param_models[model_type.capitalize()] = model
+                                    st.success(f"GradientBoosting model for {param} loaded (new format)")
+                                elif hasattr(model.estimators_[0][0], 'predict'):
+                                    # This is a valid GradientBoosting model (old format)
+                                    param_models[model_type.capitalize()] = model
+                                else:
+                                    st.warning(f"GradientBoosting model for {param} has unknown estimator format")
+                                    # Try to use it anyway
+                                    param_models[model_type.capitalize()] = model
                                 
                             elif (model_type == 'gradientboosting' and 
                                   model_type_loaded == 'GradientBoostingRegressor'):
@@ -358,58 +367,13 @@ def process_spectrum(spectrum_file, models, target_length=64607):
             if param not in models['all_models']:
                 st.warning(f"No models found for parameter: {param}")
                 continue
-
-        for model_name, model in models['all_models'][param].items():
-            try:
-                # SPECIAL FIX FOR GRADIENTBOOSTING MODELS - VERSION COMPATIBILITY
-                if (model_name.lower() == 'gradientboosting' and 
-                    hasattr(model, 'estimators_') and
-                    len(model.estimators_) > 0):
-                    
-                    # Check if estimators are numpy arrays (new scikit-learn version)
-                    if isinstance(model.estimators_[0][0], np.ndarray):
-                        # This is the new format - use the model's predict method directly
-                        y_pred = model.predict(X_pca)
-                        y_pred_orig = models['param_scalers'][param].inverse_transform(y_pred.reshape(-1, 1)).flatten()
-                        
-                # For uncertainty estimation with new format
-                try:
-                    # Try to get staged predictions if available
-                    if hasattr(model, 'staged_predict'):
-                        staged_preds = list(model.staged_predict(X_pca))
-                        staged_preds_orig = [models['param_scalers'][param].inverse_transform(pred.reshape(-1, 1)).flatten()[0] 
-                                           for pred in staged_preds]
-                        # Use std of later stage predictions (after convergence)
-                        n_stages = len(staged_preds_orig)
-                        if n_stages > 10:
-                            uncertainty = np.std(staged_preds_orig[-10:])
-                        else:
-                            uncertainty = np.std(staged_preds_orig)
-                    else:
-                        # Fallback: use training error or percentage
-                        if param in models.get('training_errors', {}) and model_name in models['training_errors'][param]:
-                            uncertainty = models['training_errors'][param][model_name]
-                        else:
-                            uncertainty = abs(y_pred_orig[0]) * 0.1
-                except Exception as e:
-                    st.warning(f"Error in uncertainty estimation for {model_name}: {e}")
-                    uncertainty = abs(y_pred_orig[0]) * 0.1
                 
-                param_predictions[model_name] = y_pred_orig[0]
-                param_uncertainties[model_name] = uncertainty
-                continue
-            else:
-                # Old format - estimators have predict method
-                if not hasattr(model.estimators_[0][0], 'predict'):
-                    st.error(f"GradientBoosting model for {param} is corrupted")
-                    continue
-        
-        # Skip models that don't have predict method
-        if not hasattr(model, 'predict'):
-            st.warning(f"Skipping {model_name} for {param}: no predict method")
-            continue
-            
-
+            for model_name, model in models['all_models'][param].items():
+                try:
+                    # Skip models that don't have predict method
+                    if not hasattr(model, 'predict'):
+                        st.warning(f"Skipping {model_name} for {param}: no predict method")
+                        continue
                         
                     if model_name.lower() == 'gaussianprocess':
                         # Gaussian Process provides native uncertainty
@@ -421,13 +385,16 @@ def process_spectrum(spectrum_file, models, target_length=64607):
                         param_uncertainties[model_name] = y_std_orig[0]
                         
                     else:
-                        # For other models
+                        # For ALL other models including GradientBoosting
                         y_pred = model.predict(X_pca)
                         y_pred_orig = models['param_scalers'][param].inverse_transform(y_pred.reshape(-1, 1)).flatten()
                         
                         # Estimate uncertainty based on model type
-                        if hasattr(model, 'estimators_'):
-                            # Use standard deviation of tree predictions (for Random Forest)
+                        if (hasattr(model, 'estimators_') and 
+                            len(model.estimators_) > 0 and 
+                            not isinstance(model.estimators_[0][0], np.ndarray) and
+                            hasattr(model.estimators_[0][0], 'predict')):
+                            # Use standard deviation of tree predictions (for Random Forest and OLD GradientBoosting format)
                             tree_preds = [tree.predict(X_pca) for tree in model.estimators_]
                             tree_preds_orig = [models['param_scalers'][param].inverse_transform(pred.reshape(-1, 1)).flatten()[0] 
                                              for pred in tree_preds]
@@ -817,4 +784,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
