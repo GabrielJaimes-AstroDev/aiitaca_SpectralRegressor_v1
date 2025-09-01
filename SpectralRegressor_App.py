@@ -23,7 +23,7 @@ plt.rcParams['mathtext.fontset'] = 'stix'  # For mathematical symbols
 
 # Page configuration
 st.set_page_config(
-    page_title="D.Spectral Parameters Predictor",
+    page_title="D.Spectral Parameters Regressor",
     page_icon="🔭",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -83,7 +83,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Title of the application
-st.title("🔭 Spectral Parameters Predictor")
+st.title("🔭 Spectral Parameters Regressor")
 st.markdown("""
 This application predicts physical parameters of astronomical spectra using machine learning models.
 Upload a spectrum file and trained models to get predictions.
@@ -873,5 +873,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
