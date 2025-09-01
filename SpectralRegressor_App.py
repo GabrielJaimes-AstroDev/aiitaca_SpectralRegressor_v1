@@ -158,6 +158,45 @@ def get_param_label(param):
     }
     return labels.get(param, param)
 
+def create_pca_variance_plot(ipca_model):
+    """Create PCA variance explained plot"""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # Plot cumulative explained variance
+    cumulative_variance = np.cumsum(ipca_model.explained_variance_ratio_)
+    n_components = len(cumulative_variance)
+    
+    ax1.plot(range(1, n_components + 1), cumulative_variance, 'b-', marker='o', linewidth=2, markersize=4)
+    ax1.set_xlabel('Number of PCA Components', fontfamily='Times New Roman', fontsize=12)
+    ax1.set_ylabel('Cumulative Explained Variance', fontfamily='Times New Roman', fontsize=12)
+    ax1.set_title('Cumulative Variance vs. PCA Components', fontfamily='Times New Roman', fontsize=14, fontweight='bold')
+    ax1.grid(True, alpha=0.3)
+    ax1.set_ylim(0, 1.05)
+    
+    # Highlight the current number of components used
+    current_components = ipca_model.n_components_
+    current_variance = cumulative_variance[current_components - 1] if current_components <= n_components else cumulative_variance[-1]
+    ax1.axvline(x=current_components, color='r', linestyle='--', alpha=0.8, label=f'Current: {current_components} comp.')
+    ax1.axhline(y=current_variance, color='r', linestyle='--', alpha=0.8)
+    ax1.legend()
+    
+    # Plot individual explained variance
+    individual_variance = ipca_model.explained_variance_ratio_
+    ax2.bar(range(1, n_components + 1), individual_variance, alpha=0.7, color='green')
+    ax2.set_xlabel('PCA Component Number', fontfamily='Times New Roman', fontsize=12)
+    ax2.set_ylabel('Individual Explained Variance', fontfamily='Times New Roman', fontsize=12)
+    ax2.set_title('Individual Variance per Component', fontfamily='Times New Roman', fontsize=14, fontweight='bold')
+    ax2.grid(True, alpha=0.3)
+    
+    # Add text with variance information
+    total_variance = cumulative_variance[-1] if n_components > 0 else 0
+    plt.figtext(0.5, 0.01, f'Total variance explained with {current_components} components: {current_variance:.3f} ({current_variance*100:.1f}%)', 
+                ha='center', fontfamily='Times New Roman', fontsize=12, 
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.7))
+    
+    plt.tight_layout()
+    return fig
+
 def create_model_performance_plots(models):
     """Create True Value vs Predicted Value plots for each model type"""
     param_names = ['logn', 'tex', 'velo', 'fwhm']
@@ -591,10 +630,22 @@ def main():
                         model_count = len(models['all_models'][param])
                         st.write(f"{param}: {model_count} model(s) loaded")
                 
-                # Show model performance plots for each model type
-                st.subheader("📈 Model Performance Overview")
-                st.info("Showing typical parameter ranges for each model type")
-                create_model_performance_plots(models)
+                # Show PCA variance plot
+                st.subheader("📊 PCA Variance Analysis")
+                pca_fig = create_pca_variance_plot(models['ipca'])
+                st.pyplot(pca_fig)
+                
+                # Option to download the PCA plot
+                buf = BytesIO()
+                pca_fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
+                buf.seek(0)
+                
+                st.download_button(
+                    label="📥 Download PCA variance plot",
+                    data=buf,
+                    file_name="pca_variance_analysis.png",
+                    mime="image/png"
+                )
             
             # Process spectrum
             with st.spinner("Processing spectrum and making predictions..."):
@@ -608,7 +659,7 @@ def main():
                 st.header("📊 Prediction Results")
                 
                 # Create tabs for different visualizations
-                tab1, tab2, tab3 = st.tabs(["Summary", "Individual Plots", "Combined Plot"])
+                tab1, tab2, tab3, tab4 = st.tabs(["Summary", "Model Performance", "Individual Plots", "Combined Plot"])
                 
                 with tab1:
                     st.subheader("Prediction Summary")
@@ -647,6 +698,11 @@ def main():
                         st.warning("No predictions were generated")
                 
                 with tab2:
+                    st.subheader("📈 Model Performance Overview")
+                    st.info("Showing typical parameter ranges for each model type")
+                    create_model_performance_plots(models)
+                
+                with tab3:
                     st.subheader("Prediction Plots by Parameter")
                     
                     # Create individual plots for each parameter
@@ -677,7 +733,7 @@ def main():
                         else:
                             st.warning(f"No predictions available for {label}")
                 
-                with tab3:
+                with tab4:
                     st.subheader("Combined Prediction Plot")
                     
                     # Create combined plot
