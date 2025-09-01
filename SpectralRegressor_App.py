@@ -11,8 +11,6 @@ import tempfile
 from io import BytesIO
 import zipfile
 import base64
-import requests
-import gdown
 
 # Page configuration
 st.set_page_config(
@@ -28,25 +26,6 @@ st.markdown("""
 This application predicts physical parameters of astronomical spectra using machine learning models.
 Upload a spectrum file and trained models to get predictions.
 """)
-
-# Function to download models from Google Drive
-@st.cache_resource
-def download_models_from_drive(drive_url, output_path="models.zip"):
-    """Download models from Google Drive"""
-    try:
-        # Extract file ID from Google Drive URL
-        file_id = drive_url.split('/d/')[1].split('/')[0]
-        download_url = f"https://drive.google.com/uc?id={file_id}"
-        
-        # Download the file
-        gdown.download(download_url, output_path, quiet=False)
-        
-        if os.path.exists(output_path):
-            return output_path, "✓ Models downloaded successfully from Google Drive"
-        else:
-            return None, "✗ Failed to download models from Google Drive"
-    except Exception as e:
-        return None, f"✗ Error downloading models: {str(e)}"
 
 # Function to load models (with caching for better performance)
 @st.cache_resource
@@ -358,187 +337,179 @@ def get_local_file_path(filename):
 
 # Main user interface
 def main():
-    # Google Drive URL for models
-    drive_url = "https://drive.google.com/file/d/1D_w9w9gQcdDiq2WvC_Cb98xn8HQNgCFD/view?usp=drive_link"
-    
-    # Step 1: Download models from Google Drive
-    st.sidebar.header("📥 Step 1: Download Models")
-    
-    if st.sidebar.button("⬇️ Download Models from Google Drive", type="primary"):
-        with st.spinner("Downloading models from Google Drive..."):
-            models_path, message = download_models_from_drive(drive_url)
-            
-            if models_path:
-                st.sidebar.success(message)
-                st.session_state.models_downloaded = True
-                st.session_state.models_path = models_path
-            else:
-                st.sidebar.error(message)
-    
-    # Check if models are already downloaded
-    if 'models_downloaded' not in st.session_state:
-        st.session_state.models_downloaded = False
-        st.session_state.models_path = None
-    
-    # Step 2: Load models
-    st.sidebar.header("📁 Step 2: Load Models")
-    
-    if st.session_state.models_downloaded:
-        st.sidebar.success("✓ Models downloaded successfully")
-        load_models_btn = st.sidebar.button("🔧 Load Models", type="secondary")
+    # Sidebar for file upload
+    with st.sidebar:
+        st.header("📁 Upload Files")
         
-        if load_models_btn:
-            with st.spinner("Loading models..."):
-                models, message = load_models_from_zip(st.session_state.models_path)
-                
-                if models:
-                    st.session_state.models_loaded = True
-                    st.session_state.models = models
-                    st.sidebar.success(message)
-                else:
-                    st.sidebar.error(message)
-    else:
-        st.sidebar.info("Please download models first")
-    
-    # Step 3: Upload spectrum
-    st.sidebar.header("📊 Step 3: Upload Spectrum")
-    spectrum_file = st.sidebar.file_uploader("Upload spectrum file", type=['txt', 'dat'])
-    
-    # Step 4: Process spectrum
-    st.sidebar.header("🚀 Step 4: Process Spectrum")
-    
-    process_disabled = not (st.session_state.get('models_loaded', False) and spectrum_file is not None)
-    process_btn = st.sidebar.button("Process Spectrum", type="primary", disabled=process_disabled)
+        # Option to use local models file
+        use_local_models = st.checkbox("Use local models file (models.zip in same directory)")
+        
+        # Load models
+        st.subheader("1. Trained Models")
+        if use_local_models:
+            local_zip_path = get_local_file_path("models.zip")
+            if os.path.exists(local_zip_path):
+                models_zip = local_zip_path
+                st.success("✓ Local models.zip file found")
+            else:
+                st.error("✗ models.zip not found in the same directory as this script")
+                models_zip = None
+        else:
+            models_zip = st.file_uploader("Upload ZIP file with trained models", type=['zip'])
+        
+        # Load spectrum
+        st.subheader("2. Spectrum File")
+        spectrum_file = st.file_uploader("Upload spectrum file", type=['txt', 'dat'])
+        
+        # Process button
+        process_btn = st.button("🚀 Process Spectrum", type="primary", 
+                               disabled=(models_zip is None or spectrum_file is None))
     
     # Main content
-    if process_btn and st.session_state.get('models_loaded', False) and spectrum_file is not None:
-        with st.spinner("Processing spectrum and making predictions..."):
-            results = process_spectrum(spectrum_file, st.session_state.models)
-            
-            if results is None:
-                st.error("Error processing the spectrum")
-                return
-            
-            # Display results
-            st.header("📊 Prediction Results")
-            
-            # Create tabs for different visualizations
-            tab1, tab2, tab3 = st.tabs(["Summary", "Individual Plots", "Combined Plot"])
-            
-            with tab1:
-                st.subheader("Prediction Summary")
-                
-                # Create summary table
-                summary_data = []
-                for param, label in zip(results['param_names'], results['param_labels']):
-                    param_preds = results['predictions'][param]
-                    param_uncerts = results['uncertainties'].get(param, {})
+    if models_zip is not None and spectrum_file is not None:
+        if process_btn:
+            with st.spinner("Loading and processing models..."):
+                # Load models
+                if use_local_models:
+                    models, message = load_models_from_zip(models_zip)
+                else:
+                    # For uploaded file, we need to save it temporarily first
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
+                        tmp_file.write(models_zip.getvalue())
+                        tmp_path = tmp_file.name
                     
-                    for model_name, pred_value in param_preds.items():
-                        uncert_value = param_uncerts.get(model_name, np.nan)
-                        summary_data.append({
-                            'Parameter': label,
-                            'Model': model_name,
-                            'Prediction': pred_value,
-                            'Uncertainty': uncert_value if not np.isnan(uncert_value) else 'N/A',
-                            'Units': get_units(param),
-                            'Relative_Error_%': (uncert_value / abs(pred_value) * 100) if pred_value != 0 and not np.isnan(uncert_value) else np.nan
-                        })
+                    models, message = load_models_from_zip(tmp_path)
+                    os.unlink(tmp_path)  # Clean up temp file
                 
-                summary_df = pd.DataFrame(summary_data)
-                st.dataframe(summary_df, use_container_width=True)
+                if models is None:
+                    st.error(message)
+                    return
                 
-                # Download results as CSV
-                csv = summary_df.to_csv(index=False)
-                st.download_button(
-                    label="📥 Download results as CSV",
-                    data=csv,
-                    file_name="spectrum_predictions.csv",
-                    mime="text/csv"
-                )
+                st.success(message)
             
-            with tab2:
-                st.subheader("Prediction Plots by Parameter")
+            # Process spectrum
+            with st.spinner("Processing spectrum and making predictions..."):
+                results = process_spectrum(spectrum_file, models)
                 
-                # Create individual plots for each parameter
-                for param, label in zip(results['param_names'], results['param_labels']):
-                    fig = create_comparison_plot(
-                        results['predictions'], 
-                        results['uncertainties'], 
-                        param, 
-                        label, 
-                        st.session_state.models['training_stats'],
+                if results is None:
+                    st.error("Error processing the spectrum")
+                    return
+                
+                # Display results
+                st.header("📊 Prediction Results")
+                
+                # Create tabs for different visualizations
+                tab1, tab2, tab3 = st.tabs(["Summary", "Individual Plots", "Combined Plot"])
+                
+                with tab1:
+                    st.subheader("Prediction Summary")
+                    
+                    # Create summary table
+                    summary_data = []
+                    for param, label in zip(results['param_names'], results['param_labels']):
+                        param_preds = results['predictions'][param]
+                        param_uncerts = results['uncertainties'].get(param, {})
+                        
+                        for model_name, pred_value in param_preds.items():
+                            uncert_value = param_uncerts.get(model_name, np.nan)
+                            summary_data.append({
+                                'Parameter': label,
+                                'Model': model_name,
+                                'Prediction': pred_value,
+                                'Uncertainty': uncert_value if not np.isnan(uncert_value) else 'N/A',
+                                'Units': get_units(param),
+                                'Relative_Error_%': (uncert_value / abs(pred_value) * 100) if pred_value != 0 and not np.isnan(uncert_value) else np.nan
+                            })
+                    
+                    summary_df = pd.DataFrame(summary_data)
+                    st.dataframe(summary_df, use_container_width=True)
+                    
+                    # Download results as CSV
+                    csv = summary_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download results as CSV",
+                        data=csv,
+                        file_name="spectrum_predictions.csv",
+                        mime="text/csv"
+                    )
+                
+                with tab2:
+                    st.subheader("Prediction Plots by Parameter")
+                    
+                    # Create individual plots for each parameter
+                    for param, label in zip(results['param_names'], results['param_labels']):
+                        fig = create_comparison_plot(
+                            results['predictions'], 
+                            results['uncertainties'], 
+                            param, 
+                            label, 
+                            models['training_stats'],
+                            spectrum_file.name
+                        )
+                        st.pyplot(fig)
+                        
+                        # Option to download each plot
+                        buf = BytesIO()
+                        fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
+                        buf.seek(0)
+                        
+                        st.download_button(
+                            label=f"📥 Download {label} plot",
+                            data=buf,
+                            file_name=f"prediction_{param}.png",
+                            mime="image/png",
+                            key=f"download_{param}"
+                        )
+                
+                with tab3:
+                    st.subheader("Combined Prediction Plot")
+                    
+                    # Create combined plot
+                    fig = create_combined_plot(
+                        results['predictions'],
+                        results['uncertainties'],
+                        results['param_names'],
+                        results['param_labels'],
                         spectrum_file.name
                     )
                     st.pyplot(fig)
                     
-                    # Option to download each plot
+                    # Option to download the combined plot
                     buf = BytesIO()
                     fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
                     buf.seek(0)
                     
                     st.download_button(
-                        label=f"📥 Download {label} plot",
+                        label="📥 Download combined plot",
                         data=buf,
-                        file_name=f"prediction_{param}.png",
-                        mime="image/png",
-                        key=f"download_{param}"
+                        file_name="combined_predictions.png",
+                        mime="image/png"
                     )
-            
-            with tab3:
-                st.subheader("Combined Prediction Plot")
-                
-                # Create combined plot
-                fig = create_combined_plot(
-                    results['predictions'],
-                    results['uncertainties'],
-                    results['param_names'],
-                    results['param_labels'],
-                    spectrum_file.name
-                )
-                st.pyplot(fig)
-                
-                # Option to download the combined plot
-                buf = BytesIO()
-                fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
-                buf.seek(0)
-                
-                st.download_button(
-                    label="📥 Download combined plot",
-                    data=buf,
-                    file_name="combined_predictions.png",
-                    mime="image/png"
-                )
     
     else:
         # Show instructions if files haven't been uploaded
-        st.info("👈 Please follow the steps in the sidebar to get started.")
+        st.info("👈 Please upload trained models and a spectrum file in the sidebar to get started.")
         
         # Usage instructions
         st.markdown("""
         ## Usage Instructions:
         
-        1. **Download models**: Click the "Download Models from Google Drive" button in the sidebar
-        2. **Load models**: After downloading, click "Load Models" to prepare the models for prediction
-        3. **Upload spectrum**: Select a spectrum file in text format with two columns (frequency, intensity)
+        1. **Prepare trained models**: Compress all model files (.save) and statistics (.npy) into a ZIP file named "models.zip"
+        2. **Prepare spectrum**: Ensure your spectrum file is in text format with two columns (frequency, intensity)
+        3. **Upload files**: Use the selectors in the sidebar to upload both files or use the local models.zip file
         4. **Process**: Click the 'Process Spectrum' button to get predictions
         
         ## Supported File Formats:
+        - **Models**: ZIP file containing joblib-saved models
         - **Spectra**: Text files (.txt, .dat) with two data columns
         
         ## Required Model Files:
-        The downloaded ZIP contains:
+        Your models ZIP must contain:
         - standard_scaler.save
         - incremental_pca.save
         - Parameter scalers: logn_scaler.save, tex_scaler.save, velo_scaler.save, fwhm_scaler.save
-        - Models for each parameter (Random Forest, Gradient Boosting, SVR, Gaussian Process)
-        - Training statistics and error files
-        """)
-        
-        # Display Google Drive link
-        st.markdown(f"""
-        ## Model Source:
-        Models are downloaded from: [Google Drive Link]({drive_url})
+        - At least one model per parameter (e.g., logn_randomforest.save, tex_gradientboosting.save, etc.)
+        - Optional: Training statistics and error files (training_stats_*.npy, training_errors_*.npy)
         """)
 
 if __name__ == "__main__":
