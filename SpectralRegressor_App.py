@@ -62,7 +62,7 @@ def load_models_from_zip(zip_file):
                 if os.path.exists(scaler_path):
                     models['param_scalers'][param] = joblib.load(scaler_path)
             
-            # Load trained models with error handling
+            # Load trained models with detailed debugging
             models['all_models'] = {}
             model_types = ['randomforest', 'gradientboosting', 'svr', 'gaussianprocess']
             
@@ -73,11 +73,23 @@ def load_models_from_zip(zip_file):
                     if os.path.exists(model_path):
                         try:
                             model = joblib.load(model_path)
-                            # Check if the loaded object is actually a model and not a numpy array
+                            
+                            # DEBUG: Check what type of object was loaded
+                            model_type_loaded = type(model).__name__
+                            st.write(f"DEBUG: Loaded {param}_{model_type}.save -> {model_type_loaded}")
+                            
+                            # Check if it's a numpy array (incorrectly saved model)
+                            if model_type_loaded == 'ndarray':
+                                st.warning(f"File {param}_{model_type}.save contains a numpy array, not a model!")
+                                continue
+                                
+                            # Check if the loaded object is actually a model
                             if hasattr(model, 'predict') or (hasattr(model, '__class__') and 'gaussian_process' in str(model.__class__)):
                                 param_models[model_type.capitalize()] = model
+                                st.write(f"✓ Successfully loaded {model_type} for {param}")
                             else:
-                                st.warning(f"File {param}_{model_type}.save exists but doesn't contain a valid model")
+                                st.warning(f"File {param}_{model_type}.save exists but doesn't contain a valid model object")
+                                st.write(f"Object type: {type(model)}, Methods: {[m for m in dir(model) if not m.startswith('_')]}")
                         except Exception as e:
                             st.warning(f"Error loading {param}_{model_type}.save: {str(e)}")
                 models['all_models'][param] = param_models
@@ -89,12 +101,20 @@ def load_models_from_zip(zip_file):
                 # Statistics
                 stats_file = os.path.join(temp_dir, f"training_stats_{param}.npy")
                 if os.path.exists(stats_file):
-                    models['training_stats'][param] = np.load(stats_file, allow_pickle=True).item()
+                    try:
+                        models['training_stats'][param] = np.load(stats_file, allow_pickle=True).item()
+                        st.write(f"✓ Loaded training stats for {param}")
+                    except Exception as e:
+                        st.warning(f"Error loading training stats for {param}: {e}")
                 
                 # Errors
                 errors_file = os.path.join(temp_dir, f"training_errors_{param}.npy")
                 if os.path.exists(errors_file):
-                    models['training_errors'][param] = np.load(errors_file, allow_pickle=True).item()
+                    try:
+                        models['training_errors'][param] = np.load(errors_file, allow_pickle=True).item()
+                        st.write(f"✓ Loaded training errors for {param}")
+                    except Exception as e:
+                        st.warning(f"Error loading training errors for {param}: {e}")
                     
             return models, "✓ Models loaded successfully"
             
@@ -249,10 +269,19 @@ def process_spectrum(spectrum_file, models, target_length=64607):
             param_predictions = {}
             param_uncertainties = {}
             
+            if param not in models['all_models']:
+                st.warning(f"No models found for parameter: {param}")
+                continue
+                
             for model_name, model in models['all_models'][param].items():
                 try:
+                    # DEBUG: Check model type before prediction
+                    st.write(f"DEBUG: Predicting with {model_name} for {param}, model type: {type(model).__name__}")
+                    
                     # Skip models that don't have predict method
                     if not hasattr(model, 'predict'):
+                        st.warning(f"Skipping {model_name} for {param}: no predict method")
+                        st.write(f"Available methods: {[m for m in dir(model) if not m.startswith('_')][:10]}...")
                         continue
                         
                     if model_name.lower() == 'gaussianprocess':
@@ -288,7 +317,8 @@ def process_spectrum(spectrum_file, models, target_length=64607):
                                     uncertainty = np.std(staged_preds_orig[-10:])
                                 else:
                                     uncertainty = np.std(staged_preds_orig)
-                            except:
+                            except Exception as e:
+                                st.warning(f"Error in staged prediction for {model_name}: {e}")
                                 uncertainty = abs(y_pred_orig[0]) * 0.1
                         else:
                             # For SVR and other models, use training error as proxy
@@ -301,8 +331,14 @@ def process_spectrum(spectrum_file, models, target_length=64607):
                         param_predictions[model_name] = y_pred_orig[0]
                         param_uncertainties[model_name] = uncertainty
                         
+                    st.write(f"✓ {model_name} prediction for {param}: {param_predictions[model_name]:.4f} ± {param_uncertainties[model_name]:.4f}")
+                        
                 except Exception as e:
                     st.error(f"Error predicting with {model_name} for {param}: {e}")
+                    # Additional debug info
+                    st.write(f"Model type: {type(model)}")
+                    if hasattr(model, '__dict__'):
+                        st.write(f"Model attributes: {list(model.__dict__.keys())}")
                     continue
             
             predictions[param] = param_predictions
@@ -483,6 +519,9 @@ def main():
         st.subheader("2. Spectrum File")
         spectrum_file = st.file_uploader("Upload spectrum file", type=['txt', 'dat'])
         
+        # Debug mode
+        debug_mode = st.checkbox("Enable debug mode")
+        
         # Process button
         process_btn = st.button("🚀 Process Spectrum", type="primary", 
                                disabled=(models_zip is None or spectrum_file is None))
@@ -516,11 +555,26 @@ def main():
                     if param in models['all_models']:
                         model_count = len(models['all_models'][param])
                         st.write(f"{param}: {model_count} model(s) loaded")
+                        if debug_mode:
+                            for model_name in models['all_models'][param].keys():
+                                st.write(f"  - {model_name}")
                 
-                # Show training performance plots
-                st.subheader("📈 Training Performance Overview")
-                performance_fig = create_training_performance_plots(models)
-                st.pyplot(performance_fig)
+                # Show available training statistics
+                if debug_mode:
+                    st.subheader("Training Statistics")
+                    for param in param_names:
+                        if param in models.get('training_stats', {}):
+                            st.write(f"{param}: {models['training_stats'][param]}")
+                        else:
+                            st.write(f"{param}: No training statistics available")
+                
+                # Show training performance plots only if we have training data
+                if any(param in models.get('training_stats', {}) for param in param_names):
+                    st.subheader("📈 Training Performance Overview")
+                    performance_fig = create_training_performance_plots(models)
+                    st.pyplot(performance_fig)
+                else:
+                    st.warning("No training statistics available. Cannot display performance plots.")
             
             # Process spectrum
             with st.spinner("Processing spectrum and making predictions..."):
@@ -542,31 +596,35 @@ def main():
                     # Create summary table
                     summary_data = []
                     for param, label in zip(results['param_names'], results['param_labels']):
-                        param_preds = results['predictions'][param]
-                        param_uncerts = results['uncertainties'].get(param, {})
+                        if param in results['predictions']:
+                            param_preds = results['predictions'][param]
+                            param_uncerts = results['uncertainties'].get(param, {})
+                            
+                            for model_name, pred_value in param_preds.items():
+                                uncert_value = param_uncerts.get(model_name, np.nan)
+                                summary_data.append({
+                                    'Parameter': label,
+                                    'Model': model_name,
+                                    'Prediction': pred_value,
+                                    'Uncertainty': uncert_value if not np.isnan(uncert_value) else 'N/A',
+                                    'Units': get_units(param),
+                                    'Relative_Error_%': (uncert_value / abs(pred_value) * 100) if pred_value != 0 and not np.isnan(uncert_value) else np.nan
+                                })
+                    
+                    if summary_data:
+                        summary_df = pd.DataFrame(summary_data)
+                        st.dataframe(summary_df, use_container_width=True)
                         
-                        for model_name, pred_value in param_preds.items():
-                            uncert_value = param_uncerts.get(model_name, np.nan)
-                            summary_data.append({
-                                'Parameter': label,
-                                'Model': model_name,
-                                'Prediction': pred_value,
-                                'Uncertainty': uncert_value if not np.isnan(uncert_value) else 'N/A',
-                                'Units': get_units(param),
-                                'Relative_Error_%': (uncert_value / abs(pred_value) * 100) if pred_value != 0 and not np.isnan(uncert_value) else np.nan
-                            })
-                    
-                    summary_df = pd.DataFrame(summary_data)
-                    st.dataframe(summary_df, use_container_width=True)
-                    
-                    # Download results as CSV
-                    csv = summary_df.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download results as CSV",
-                        data=csv,
-                        file_name="spectrum_predictions.csv",
-                        mime="text/csv"
-                    )
+                        # Download results as CSV
+                        csv = summary_df.to_csv(index=False)
+                        st.download_button(
+                            label="📥 Download results as CSV",
+                            data=csv,
+                            file_name="spectrum_predictions.csv",
+                            mime="text/csv"
+                        )
+                    else:
+                        st.warning("No predictions were generated")
                 
                 with tab2:
                     st.subheader("Prediction Plots by Parameter")
@@ -648,6 +706,10 @@ def main():
         - Parameter scalers: logn_scaler.save, tex_scaler.save, velo_scaler.save, fwhm_scaler.save
         - At least one model per parameter (e.g., logn_randomforest.save, tex_gradientboosting.save, etc.)
         - Optional: Training statistics and error files (training_stats_*.npy, training_errors_*.npy)
+        
+        ## Troubleshooting:
+        If you see errors about numpy arrays instead of models, your model files may have been saved incorrectly.
+        Make sure to save models using `joblib.dump(model, filename)` not `numpy.save()`.
         """)
 
 if __name__ == "__main__":
