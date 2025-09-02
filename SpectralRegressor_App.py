@@ -671,7 +671,7 @@ def main():
         spectrum_file = st.file_uploader("Upload spectrum file", type=['txt', 'dat'])
         
         # Process button
-        process_btn = st.button("🚀 Process Spectrum", type="primary", 
+        process_btn = st.button("Process Spectrum", type="primary", 
                                disabled=(models_zip is None or spectrum_file is None))
     
     # Main content
@@ -872,6 +872,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
