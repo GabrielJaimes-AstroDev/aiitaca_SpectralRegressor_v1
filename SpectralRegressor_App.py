@@ -258,7 +258,7 @@ def create_pca_variance_plot(ipca_model):
     plt.tight_layout()
     return fig
 
-def create_model_performance_plots(models):
+def create_model_performance_plots(models, selected_models):
     """Create True Value vs Predicted Value plots for each model type"""
     param_names = ['logn', 'tex', 'velo', 'fwhm']
     model_types = ['Randomforest', 'Gradientboosting', 'Svr', 'Gaussianprocess']
@@ -271,13 +271,13 @@ def create_model_performance_plots(models):
     
     # Create a figure for each model type
     for model_type in model_types:
-        # Check if this model type exists for any parameter
+        # Check if this model type is selected and exists for any parameter
         model_exists = any(
             param in models['all_models'] and model_type in models['all_models'][param] 
             for param in param_names
         )
         
-        if not model_exists:
+        if not model_exists or model_type not in selected_models:
             continue
             
         fig, axes = plt.subplots(2, 2, figsize=(15, 12))
@@ -521,7 +521,7 @@ def process_spectrum(spectrum_file, models, target_length=64607):
         st.error(f"Error processing the spectrum: {e}")
         return None
 
-def create_comparison_plot(predictions, uncertainties, param, label, training_stats, spectrum_name):
+def create_comparison_plot(predictions, uncertainties, param, label, training_stats, spectrum_name, selected_models):
     """Create comparison plot for a parameter"""
     fig, ax = plt.subplots(figsize=(10, 8))
     
@@ -563,19 +563,26 @@ def create_comparison_plot(predictions, uncertainties, param, label, training_st
     
     # Plot our prediction for each model WITH ERROR BARS
     colors = ['blue', 'green', 'orange', 'purple', 'red', 'brown']
+    model_count = 0
+    
     for i, (model_name, pred_value) in enumerate(param_preds.items()):
+        if model_name not in selected_models:
+            continue
+            
         # Use the predicted value without uncertainty for the x-axis
         mean_true = pred_value  # Use the predicted value itself
         uncert_value = param_uncerts.get(model_name, 0)
         
-        ax.scatter(mean_true, pred_value, color=colors[i % len(colors)], 
+        ax.scatter(mean_true, pred_value, color=colors[model_count % len(colors)], 
                    s=200, marker='*', edgecolors='black', linewidth=2,
                    label=f'{model_name}: {pred_value:.3f} ± {uncert_value:.3f}')
         
         # Add uncertainty bars for ALL models (vertical only)
         ax.errorbar(mean_true, pred_value, yerr=uncert_value, 
-                    fmt='none', ecolor=colors[i % len(colors)], 
+                    fmt='none', ecolor=colors[model_count % len(colors)], 
                     capsize=8, capthick=2, elinewidth=3, alpha=0.8)
+        
+        model_count += 1
     
     param_label = get_param_label(param)
     units = get_units(param)
@@ -595,7 +602,7 @@ def create_comparison_plot(predictions, uncertainties, param, label, training_st
     plt.tight_layout()
     return fig
 
-def create_combined_plot(predictions, uncertainties, param_names, param_labels, spectrum_name):
+def create_combined_plot(predictions, uncertainties, param_names, param_labels, spectrum_name, selected_models):
     """Create combined plot showing all parameter predictions with uncertainty"""
     fig, axes = plt.subplots(2, 2, figsize=(16, 14))
     axes = axes.flatten()
@@ -606,14 +613,28 @@ def create_combined_plot(predictions, uncertainties, param_names, param_labels, 
         param_preds = predictions[param]
         param_uncerts = uncertainties[param]
         
-        models = list(param_preds.keys())
-        values = list(param_preds.values())
-        errors = [param_uncerts.get(model, 0) for model in models]
+        # Filter models based on selection
+        filtered_models = []
+        filtered_values = []
+        filtered_errors = []
+        
+        for model_name, pred_value in param_preds.items():
+            if model_name in selected_models:
+                filtered_models.append(model_name)
+                filtered_values.append(pred_value)
+                filtered_errors.append(param_uncerts.get(model_name, 0))
+        
+        if not filtered_models:
+            ax.text(0.5, 0.5, 'No selected models for this parameter', 
+                   ha='center', va='center', transform=ax.transAxes, fontsize=12)
+            ax.set_title(f'{get_param_label(param)} - No selected models', 
+                        fontfamily='Times New Roman', fontsize=14, fontweight='bold')
+            continue
         
         # Create bar plot with error bars
-        x_pos = np.arange(len(models))
-        bars = ax.bar(x_pos, values, yerr=errors, capsize=8, alpha=0.8, 
-                     color=colors, edgecolor='black', linewidth=1)
+        x_pos = np.arange(len(filtered_models))
+        bars = ax.bar(x_pos, filtered_values, yerr=filtered_errors, capsize=8, alpha=0.8, 
+                     color=colors[:len(filtered_models)], edgecolor='black', linewidth=1)
         
         param_label = get_param_label(param)
         units = get_units(param)
@@ -623,11 +644,11 @@ def create_combined_plot(predictions, uncertainties, param_names, param_labels, 
         ax.set_title(f'{param_label} Predictions with Uncertainty', 
                     fontfamily='Times New Roman', fontsize=14, fontweight='bold')
         ax.set_xticks(x_pos)
-        ax.set_xticklabels(models, rotation=45, ha='right', fontsize=10)
+        ax.set_xticklabels(filtered_models, rotation=45, ha='right', fontsize=10)
         ax.grid(alpha=0.3, axis='y', linestyle='--')
         
         # Add value labels on bars
-        for i, (bar, value, error) in enumerate(zip(bars, values, errors)):
+        for i, (bar, value, error) in enumerate(zip(bars, filtered_values, filtered_errors)):
             height = bar.get_height()
             ax.text(bar.get_x() + bar.get_width()/2., height + error + 0.1,
                    f'{value:.3f} ± {error:.3f}', ha='center', va='bottom', 
@@ -646,6 +667,10 @@ def get_local_file_path(filename):
 
 # Main user interface
 def main():
+    # Initialize session state for model selection if not exists
+    if 'selected_models' not in st.session_state:
+        st.session_state.selected_models = ['Randomforest', 'Gradientboosting', 'Svr', 'Gaussianprocess']
+    
     # Sidebar for file upload
     with st.sidebar:
         st.header("📁 Upload Files")
@@ -669,6 +694,29 @@ def main():
         # Load spectrum
         st.subheader("2. Spectrum File")
         spectrum_file = st.file_uploader("Upload spectrum file", type=['txt', 'dat'])
+        
+        # Model selection
+        st.subheader("3. Model Selection")
+        st.write("Select which models to display in the results:")
+        
+        # Checkboxes for model selection
+        rf_selected = st.checkbox("Random Forest", value=True, key='rf_checkbox')
+        gb_selected = st.checkbox("Gradient Boosting", value=True, key='gb_checkbox')
+        svr_selected = st.checkbox("Support Vector Regression", value=True, key='svr_checkbox')
+        gp_selected = st.checkbox("Gaussian Process", value=True, key='gp_checkbox')
+        
+        # Update selected models in session state
+        selected_models = []
+        if rf_selected:
+            selected_models.append('Randomforest')
+        if gb_selected:
+            selected_models.append('Gradientboosting')
+        if svr_selected:
+            selected_models.append('Svr')
+        if gp_selected:
+            selected_models.append('Gaussianprocess')
+            
+        st.session_state.selected_models = selected_models
         
         # Process button
         process_btn = st.button("Process Spectrum", type="primary", 
@@ -753,7 +801,7 @@ def main():
                 with tab1:
                     st.subheader("Prediction Summary")
                     
-                    # Create summary table
+                    # Create summary table (filtered by selected models)
                     summary_data = []
                     for param, label in zip(results['param_names'], results['param_labels']):
                         if param in results['predictions']:
@@ -761,6 +809,9 @@ def main():
                             param_uncerts = results['uncertainties'].get(param, {})
                             
                             for model_name, pred_value in param_preds.items():
+                                if model_name not in st.session_state.selected_models:
+                                    continue
+                                    
                                 uncert_value = param_uncerts.get(model_name, np.nan)
                                 summary_data.append({
                                     'Parameter': label,
@@ -784,12 +835,12 @@ def main():
                             mime="text/csv"
                         )
                     else:
-                        st.warning("No predictions were generated")
+                        st.warning("No predictions were generated for the selected models")
                 
                 with tab2:
                     st.subheader("📈 Model Performance Overview")
                     st.info("Showing typical parameter ranges for each model type")
-                    create_model_performance_plots(models)
+                    create_model_performance_plots(models, st.session_state.selected_models)
                 
                 with tab3:
                     st.subheader("Prediction Plots by Parameter")
@@ -803,7 +854,8 @@ def main():
                                 param, 
                                 label, 
                                 models.get('training_stats', {}),
-                                spectrum_file.name
+                                spectrum_file.name,
+                                st.session_state.selected_models
                             )
                             st.pyplot(fig)
                             
@@ -831,7 +883,8 @@ def main():
                         results['uncertainties'],
                         results['param_names'],
                         results['param_labels'],
-                        spectrum_file.name
+                        spectrum_file.name,
+                        st.session_state.selected_models
                     )
                     st.pyplot(fig)
                     
@@ -858,7 +911,8 @@ def main():
         1. **Prepare trained models**: Compress all model files (.save) and statistics (.npy) into a ZIP file named "models.zip"
         2. **Prepare spectrum**: Ensure your spectrum file is in text format with two columns (frequency, intensity)
         3. **Upload files**: Use the selectors in the sidebar to upload both files or use the local models.zip file
-        4. **Process**: Click the 'Process Spectrum' button to get predictions
+        4. **Select models**: Choose which models to display in the results using the checkboxes
+        5. **Process**: Click the 'Process Spectrum' button to get predictions
         
         ## Troubleshooting GradientBoosting Errors:
         
@@ -872,8 +926,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
