@@ -672,6 +672,14 @@ def create_summary_plot(predictions, uncertainties, param_names, param_labels, s
     fig, axes = plt.subplots(2, 2, figsize=(16, 14))
     axes = axes.flatten()
     
+    # Definir los mismos colores que en create_combined_plot
+    model_colors = {
+        'Randomforest': '#1f77b4',  # Azul
+        'Gradientboosting': '#ff7f0e',  # Naranja
+        'Svr': '#2ca02c',  # Verde
+        'Gaussianprocess': '#d62728'  # Rojo
+    }
+    
     for idx, (param, label) in enumerate(zip(param_names, param_labels)):
         ax = axes[idx]
         param_preds = predictions[param]
@@ -681,12 +689,14 @@ def create_summary_plot(predictions, uncertainties, param_names, param_labels, s
         filtered_models = []
         filtered_values = []
         filtered_errors = []
+        filtered_colors = []
         
         for model_name, pred_value in param_preds.items():
             if model_name in selected_models:
                 filtered_models.append(model_name)
                 filtered_values.append(pred_value)
                 filtered_errors.append(param_uncerts.get(model_name, 0))
+                filtered_colors.append(model_colors.get(model_name, '#9467bd'))  # Púrpura por defecto
         
         if not filtered_models:
             ax.text(0.5, 0.5, 'No selected models for this parameter', 
@@ -695,12 +705,10 @@ def create_summary_plot(predictions, uncertainties, param_names, param_labels, s
                         fontfamily='Times New Roman', fontsize=14, fontweight='bold')
             continue
         
-        # Create bar plot with error bars
+        # Create bar plot with error bars usando los mismos colores
         x_pos = np.arange(len(filtered_models))
-        colors = plt.cm.Set3(np.linspace(0, 1, len(filtered_models)))
-        
         bars = ax.bar(x_pos, filtered_values, yerr=filtered_errors, capsize=8, alpha=0.8, 
-                     color=colors, edgecolor='black', linewidth=1)
+                     color=filtered_colors, edgecolor='black', linewidth=1)
         
         param_label = get_param_label(param)
         units = get_units(param)
@@ -1084,3 +1092,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
