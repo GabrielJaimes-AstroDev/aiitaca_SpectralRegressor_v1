@@ -56,6 +56,13 @@ st.markdown("""
     border-radius: 10px;
     text-align: center;
 }
+.expected-value-input {
+    background-color: #FFF3CD;
+    padding: 10px;
+    border-radius: 5px;
+    border-left: 4px solid #FFC107;
+    margin: 10px 0px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -660,6 +667,82 @@ def create_combined_plot(predictions, uncertainties, param_names, param_labels, 
     plt.tight_layout()
     return fig
 
+def create_summary_plot(predictions, uncertainties, param_names, param_labels, selected_models, expected_values=None):
+    """Create a summary plot showing all parameter predictions in one figure"""
+    fig, axes = plt.subplots(2, 2, figsize=(16, 14))
+    axes = axes.flatten()
+    
+    for idx, (param, label) in enumerate(zip(param_names, param_labels)):
+        ax = axes[idx]
+        param_preds = predictions[param]
+        param_uncerts = uncertainties[param]
+        
+        # Filter models based on selection
+        filtered_models = []
+        filtered_values = []
+        filtered_errors = []
+        
+        for model_name, pred_value in param_preds.items():
+            if model_name in selected_models:
+                filtered_models.append(model_name)
+                filtered_values.append(pred_value)
+                filtered_errors.append(param_uncerts.get(model_name, 0))
+        
+        if not filtered_models:
+            ax.text(0.5, 0.5, 'No selected models for this parameter', 
+                   ha='center', va='center', transform=ax.transAxes, fontsize=12)
+            ax.set_title(f'{get_param_label(param)} - No selected models', 
+                        fontfamily='Times New Roman', fontsize=14, fontweight='bold')
+            continue
+        
+        # Create bar plot with error bars
+        x_pos = np.arange(len(filtered_models))
+        colors = plt.cm.Set3(np.linspace(0, 1, len(filtered_models)))
+        
+        bars = ax.bar(x_pos, filtered_values, yerr=filtered_errors, capsize=8, alpha=0.8, 
+                     color=colors, edgecolor='black', linewidth=1)
+        
+        param_label = get_param_label(param)
+        units = get_units(param)
+        
+        # Add expected value if provided
+        if expected_values and param in expected_values and expected_values[param]['value'] is not None:
+            exp_value = expected_values[param]['value']
+            exp_error = expected_values[param].get('error', 0)
+            
+            # Draw a horizontal line for the expected value
+            ax.axhline(y=exp_value, color='red', linestyle='-', linewidth=2, alpha=0.8, label='Expected value')
+            
+            # Add error range for expected value
+            if exp_error > 0:
+                ax.axhspan(exp_value - exp_error, exp_value + exp_error, 
+                          alpha=0.2, color='red', label='Expected range')
+        
+        ax.set_xlabel('Model', fontfamily='Times New Roman', fontsize=12)
+        ax.set_ylabel(f'Predicted Value {param_label} ({units})', fontfamily='Times New Roman', fontsize=12)
+        ax.set_title(f'{param_label} Predictions', 
+                    fontfamily='Times New Roman', fontsize=14, fontweight='bold')
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(filtered_models, rotation=45, ha='right', fontsize=10)
+        ax.grid(alpha=0.3, axis='y', linestyle='--')
+        
+        # Add value labels on bars
+        for i, (bar, value, error) in enumerate(zip(bars, filtered_values, filtered_errors)):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height + error + 0.1,
+                   f'{value:.3f} ± {error:.3f}', ha='center', va='bottom', 
+                   fontweight='bold', fontsize=9, bbox=dict(boxstyle="round,pad=0.3", 
+                   facecolor="yellow", alpha=0.7))
+        
+        # Add legend if expected value is shown
+        if expected_values and param in expected_values and expected_values[param]['value'] is not None:
+            ax.legend(loc='upper right')
+    
+    plt.suptitle('Summary of Parameter Predictions', 
+                fontfamily='Times New Roman', fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    return fig
+
 # Function to get local file path
 def get_local_file_path(filename):
     """Get path to a local file in the same directory as the script"""
@@ -670,6 +753,15 @@ def main():
     # Initialize session state for model selection if not exists
     if 'selected_models' not in st.session_state:
         st.session_state.selected_models = ['Randomforest', 'Gradientboosting', 'Svr', 'Gaussianprocess']
+    
+    # Initialize session state for expected values
+    if 'expected_values' not in st.session_state:
+        st.session_state.expected_values = {
+            'logn': {'value': None, 'error': None},
+            'tex': {'value': None, 'error': None},
+            'velo': {'value': None, 'error': None},
+            'fwhm': {'value': None, 'error': None}
+        }
     
     # Sidebar for file upload
     with st.sidebar:
@@ -717,6 +809,37 @@ def main():
             selected_models.append('Gaussianprocess')
             
         st.session_state.selected_models = selected_models
+        
+        # Expected values input
+        st.subheader("4. Expected Values (Optional)")
+        st.write("Enter expected values and uncertainties for comparison:")
+        
+        param_names = ['logn', 'tex', 'velo', 'fwhm']
+        param_labels = ['LogN', 'T_ex', 'V_los', 'FWHM']
+        units = ['log(cm⁻³)', 'K', 'km/s', 'km/s']
+        
+        for i, (param, label, unit) in enumerate(zip(param_names, param_labels, units)):
+            st.markdown(f'<div class="expected-value-input"><strong>{label} ({unit})</strong></div>', unsafe_allow_html=True)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                value = st.number_input(
+                    f"Expected value for {label}",
+                    value=st.session_state.expected_values[param]['value'],
+                    placeholder=f"Enter expected {label}",
+                    key=f"exp_{param}_value"
+                )
+                st.session_state.expected_values[param]['value'] = value if value != 0 else None
+            
+            with col2:
+                error = st.number_input(
+                    f"Uncertainty for {label}",
+                    value=st.session_state.expected_values[param]['error'],
+                    min_value=0.0,
+                    placeholder=f"Enter uncertainty for {label}",
+                    key=f"exp_{param}_error"
+                )
+                st.session_state.expected_values[param]['error'] = error if error != 0 else None
         
         # Process button
         process_btn = st.button("Process Spectrum", type="primary", 
@@ -836,6 +959,40 @@ def main():
                         )
                     else:
                         st.warning("No predictions were generated for the selected models")
+                    
+                    # Add summary plot with expected values
+                    st.subheader("Summary Plot with Expected Values")
+                    
+                    # Check if any expected values are provided
+                    has_expected_values = any(
+                        st.session_state.expected_values[param]['value'] is not None 
+                        for param in param_names
+                    )
+                    
+                    if has_expected_values:
+                        st.info("Red line shows expected value with shaded uncertainty range")
+                    
+                    summary_fig = create_summary_plot(
+                        results['predictions'],
+                        results['uncertainties'],
+                        results['param_names'],
+                        results['param_labels'],
+                        st.session_state.selected_models,
+                        st.session_state.expected_values if has_expected_values else None
+                    )
+                    st.pyplot(summary_fig)
+                    
+                    # Option to download the summary plot
+                    buf = BytesIO()
+                    summary_fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
+                    buf.seek(0)
+                    
+                    st.download_button(
+                        label="📥 Download summary plot",
+                        data=buf,
+                        file_name="summary_predictions.png",
+                        mime="image/png"
+                    )
                 
                 with tab2:
                     st.subheader("📈 Model Performance Overview")
@@ -912,7 +1069,8 @@ def main():
         2. **Prepare spectrum**: Ensure your spectrum file is in text format with two columns (frequency, intensity)
         3. **Upload files**: Use the selectors in the sidebar to upload both files or use the local models.zip file
         4. **Select models**: Choose which models to display in the results using the checkboxes
-        5. **Process**: Click the 'Process Spectrum' button to get predictions
+        5. **Enter expected values (optional)**: Provide expected values and uncertainties for comparison
+        6. **Process**: Click the 'Process Spectrum' button to get predictions
         
         ## Troubleshooting GradientBoosting Errors:
         
