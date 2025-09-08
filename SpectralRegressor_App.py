@@ -671,13 +671,13 @@ def create_summary_plot(predictions, uncertainties, param_names, param_labels, s
     """Create a summary plot showing all parameter predictions in one figure"""
     fig, axes = plt.subplots(2, 2, figsize=(16, 14))
     axes = axes.flatten()
-    
+    #colors = ['blue', 'green', 'orange', 'purple', 'red', 'brown']
     # Definir los mismos colores que en create_combined_plot
     model_colors = {
-        'Randomforest': '#1f77b4',  # Azul
-        'Gradientboosting': '#ff7f0e',  # Naranja
-        'Svr': '#2ca02c',  # Verde
-        'Gaussianprocess': '#d62728'  # Rojo
+        'Randomforest':'blue',  # Azul
+        'Gradientboosting': 'green',  # Naranja
+        'Svr': 'orange',  # Verde
+        'Gaussianprocess': 'purple'  # Rojo
     }
     
     for idx, (param, label) in enumerate(zip(param_names, param_labels)):
@@ -1092,4 +1092,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
