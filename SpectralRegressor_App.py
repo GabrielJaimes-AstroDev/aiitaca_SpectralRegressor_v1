@@ -1079,7 +1079,7 @@ def main():
         4. **Select models**: Choose which models to display in the results using the checkboxes
         5. **Enter expected values (optional)**: Provide expected values and uncertainties for comparison
         6. **Process**: Click the 'Process Spectrum' button to get predictions
-        
+        """)
 
 
 if __name__ == "__main__":
