@@ -1080,17 +1080,10 @@ def main():
         5. **Enter expected values (optional)**: Provide expected values and uncertainties for comparison
         6. **Process**: Click the 'Process Spectrum' button to get predictions
         
-        ## Troubleshooting GradientBoosting Errors:
-        
-        Your GradientBoosting models appear to have corrupted estimators. This is a known issue that can happen when:
-        
-        1. The models were saved with an incompatible version of scikit-learn
-        2. There was an issue during the model training process
-        
-        **Solution**: You need to retrain the GradientBoosting models using a consistent environment.
-        """)
+
 
 if __name__ == "__main__":
     main()
+
 
 
