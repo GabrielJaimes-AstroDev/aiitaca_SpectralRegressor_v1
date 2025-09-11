@@ -209,7 +209,7 @@ def load_models_from_zip(zip_file):
 def get_units(param):
     """Get units for each parameter"""
     units = {
-        'logn': 'log(cm⁻³)',
+        'logn': 'log(cm⁻2)',
         'tex': 'K',
         'velo': 'km/s',
         'fwhm': 'km/s'
@@ -1084,6 +1084,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
