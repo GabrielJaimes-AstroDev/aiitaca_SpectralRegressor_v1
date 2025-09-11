@@ -417,7 +417,7 @@ def process_spectrum(spectrum_file, models, target_length=64607):
         uncertainties = {}
         
         param_names = ['logn', 'tex', 'velo', 'fwhm']
-        param_labels = ['log(n)', 'T_ex (K)', 'V_los (km/s)', 'FWHM (km/s)']
+        param_labels = ['log(N)', 'T_ex (K)', 'V_los (km/s)', 'FWHM (km/s)']
         
         for param in param_names:
             param_predictions = {}
@@ -824,7 +824,7 @@ def main():
         
         param_names = ['logn', 'tex', 'velo', 'fwhm']
         param_labels = ['LogN', 'T_ex', 'V_los', 'FWHM']
-        units = ['log(cm⁻³)', 'K', 'km/s', 'km/s']
+        units = ['log(cm⁻2)', 'K', 'km/s', 'km/s']
         
         for i, (param, label, unit) in enumerate(zip(param_names, param_labels, units)):
             st.markdown(f'<div class="expected-value-input"><strong>{label} ({unit})</strong></div>', unsafe_allow_html=True)
@@ -1084,6 +1084,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
